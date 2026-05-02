@@ -34,7 +34,7 @@ download_file <- function(year) {
 full_data <- map_dfr(15:18, ~download_file(.x))
 
 # make sure data matches example
-head(full_data)
+print(full_data, n = 10)
 ```
 
 #### Conduct some basic data cleaning to make your data file look like the following.
@@ -66,7 +66,7 @@ clean_data <- full_data |>
   )
 
 # check if data matches
-head(clean_data)
+print(clean_data, n = 10)
 
 # level is descending instead of ascending but the numbers for level and n match
 # referenced old notes from the first data class (: 
@@ -75,11 +75,14 @@ head(clean_data)
 ### 2. Sum the *n* across grades and school for each district within each academic year, student group, and level. Calculate the number of schools (unique schools listed) for each district. Also move your data to a wider format where the student groups become new columns, filled by the district n. Remove districts that did not report numbers for one or both student groups (i.e., drop missing data from the new columns). 
 
 ```{r}
-grouped_data <- clean_data |>
+grouped <- clean_data |>
+  group_by(district) |>
+  mutate(n_schools = n_distinct(school)) |>
+  ungroup() |>
   group_by(academic_year, district, student_group, level) |>
-  summarize(
+   summarize(
     district_n = sum(n),
-    n_schools = n_distinct(school),
+    n_schools = first(n_schools),
     .groups = "drop") |>
   pivot_wider(
     names_from = student_group,
@@ -88,8 +91,9 @@ grouped_data <- clean_data |>
   clean_names() |>
   drop_na(hispanic_latino, white)
 
-# had to look up how to change the column names without spaces (janitor package) and why my code wasn't working initially (== instead of = in summarize and did not drop groups): https://share.google/aimode/DRsGzTotKUPXIfLxX
-# 
+print(grouped, n = 10)
+
+# had to look up how to change the column names without spaces (janitor package), why my code wasn't working initially (== instead of = in summarize and did not drop groups), and how to keep n_schools in the final tibble: https://share.google/aimode/sUKslPl6AuEpXefR1
 ```
 
 ## **Part B: Achievement Disparities**
