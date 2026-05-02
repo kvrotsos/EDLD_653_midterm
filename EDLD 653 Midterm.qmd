@@ -1,0 +1,170 @@
+---
+title: "EDLD 653 Midterm"
+author: "Kat Vrotsos"
+format: html
+editor: visual
+embed-resources: true
+cache: true
+---
+
+```{r}
+# load libraries
+library(tidyverse)
+library(here)
+library(rio)
+library(glue)
+library(janitor)
+```
+
+## Part A: Data
+
+The following function downloads data from the Oregon Department of education website on the number of students who scored in each performance category on the statewide assessment by race/ethnicity for every school in the state. It takes one argument, `year`, which must be a two digit integer from 15 to 18 (representing the 2014-15 to 2017-18 school years). It actually won’t work on later years because the file structure changed and I wanted to keep the function simple.
+
+```{r}
+download_file <- function(year) {
+  link <- glue::glue("https://www.oregon.gov/ode/educator-resources/assessment/TestResults20{year}/pagr_schools_ela_raceethnicity_{year-1}{year}.xlsx")
+  rio::import(link, setclass = "tibble", na = c("-", "--", "*"))
+}
+```
+
+### 1. Use the function above to download **all** of the data from the 2014-15 to 2017-18 school years and bind it into a single data frame, **using a single function** (i.e., one line of code). 
+
+```{r}
+# map onto years from 15 to 18 using download_file function
+full_data <- map_dfr(15:18, ~download_file(.x))
+
+# make sure data matches example
+head(full_data)
+```
+
+#### Conduct some basic data cleaning to make your data file look like the following.
+
+-   Filter for only student groups coded as `"White"` or `"Hispanic/Latino"`.
+
+-   Select variables related to the number of students in each of the levels (1 through 4), and **not** percentages or combined levels.
+
+-   Remove any row that has missing data in any of the *n* variables
+
+```{r}
+clean_data <- full_data |>
+  filter(`Student Group` == 'White' | `Student Group` == 'Hispanic/Latino') |>
+  drop_na(`Number Level 1`, `Number Level 2`, `Number Level 3`, `Number Level 4`) |>
+  pivot_longer(
+    cols = starts_with('Number Level'),
+    names_to = 'level',
+    values_to = 'n',
+    names_prefix = 'Number Level '
+  ) |>
+  select(
+    academic_year = `Academic Year`,
+    district = District,
+    school = School,
+    student_group = `Student Group`,
+    grade_level = `Grade Level`,
+    level,
+    n
+  )
+
+# check if data matches
+head(clean_data)
+
+# level is descending instead of ascending but the numbers for level and n match
+# referenced old notes from the first data class (: 
+```
+
+### 2. Sum the *n* across grades and school for each district within each academic year, student group, and level. Calculate the number of schools (unique schools listed) for each district. Also move your data to a wider format where the student groups become new columns, filled by the district n. Remove districts that did not report numbers for one or both student groups (i.e., drop missing data from the new columns). 
+
+```{r}
+grouped_data <- clean_data |>
+  group_by(academic_year, district, student_group, level) |>
+  summarize(
+    district_n = sum(n),
+    n_schools = n_distinct(school),
+    .groups = "drop") |>
+  pivot_wider(
+    names_from = student_group,
+    values_from = district_n
+  ) |>
+  clean_names() |>
+  drop_na(hispanic_latino, white)
+
+# had to look up how to change the column names without spaces (janitor package) and why my code wasn't working initially (== instead of = in summarize and did not drop groups): https://share.google/aimode/DRsGzTotKUPXIfLxX
+# 
+```
+
+## **Part B: Achievement Disparities**
+
+Please install the [`{gapr}`](https://github.com/datalorax/gapr) package using the following code:
+
+```{r}
+remotes::install_github("datalorax/gapr")
+```
+
+The `{gapr}` package includes a function, `estimate_v()`, which estimates the average difference between two distributions in terms of an effect size when the only data available are counts within bins (for more information, see [Ho & Reardon, 2012](https://journals.sagepub.com/doi/10.3102/1076998611411918)). The nice thing about this approach is that we’re able to obtain the effect size of average differences in achievement between two groups of students as if we had the full, student level data even though we just have counts within bins (performance levels).
+
+The `estimate_v()` function takes 3 arguments in the following order:
+
+1.  the data frame including the counts for each group,
+
+2.  a character string stating the name of the column with the counts for the reference group, and
+
+3.  a character string stating the name of the column with the counts for the focal group.
+
+To estimate the average achievement difference between students coded Hispanic/Latino versus White for the first school district in the first year in our data, we would run the following:
+
+```{r}
+library(gapr)
+d[1:4, ] |> # data source - just first four rows for first district
+  estimate_v("white", "hispanic_latino") # columns for reference/focal groups
+```
+
+We can see that students coded Hispanic/Latino scored, on average, about 0.81 standard deviations *below* students coded White within this school district for this year.
+
+### **1.** Estimate the average achievement differences in terms of an effect size for every school district in the state that reported data on both student groups (i.e., using the data we created above), for each academic year. Conduct this analysis twice, once using `group_by() |> nest()` and `map()` and once using `nest_by() |> summarize()`.
+
+Note, on my computer these took about 1 minute per analysis. It will likely take a bit longer for you, but shouldn’t take *too* long. You may get a warning. Just go ahead and ignore that for now.
+
+```{r}
+# using group_by() |> nest() and map()
+```
+
+```{r}
+# using nest_by() |> summarize()
+```
+
+### 2. Reproduce the following plot to confirm that the estimates are equivalent across methods.
+
+```{r}
+
+```
+
+### 3. The plot below shows the achievement difference estimates for one school district across years. Produce a similar plot to the below for each of the first 100 school districts. Once you’ve created all the plots, **reproduce them again using an alternative method**. Make sure you don’t miss the caption noting the number of schools in the district.
+
+**Hint**: You need to select unique *districts*. You may want to try something like the following:
+
+```{r}
+dists <- unique(v$district)[1:100]
+
+model_list_object |> 
+  filter(district %in% dists)
+```
+
+### 4. Save the plots into a “plots” directory. Make sure the file names are meaningful.
+
+**HINTS**
+
+-   You don’t have to use a loop to create the file names (maybe give `{glue}` a try? Otherwise `paste` or `paste0` will work fine).
+
+-   When working with the code, limit the number of plots you’re saving to, say, the first five to make sure it works before running it on all plots.
+
+```{r}
+
+```
+
+## Extra Credit
+
+#### From question B.3. above, create a third set of plots that puts together each of the pairs of plots from the two methods to confirm that the plots were produced identically by both methods.
+
+```{r}
+
+```
