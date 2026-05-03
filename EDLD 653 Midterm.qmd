@@ -14,6 +14,7 @@ library(here)
 library(rio)
 library(glue)
 library(janitor)
+library(gapr)
 ```
 
 ## Part A: Data
@@ -118,7 +119,7 @@ To estimate the average achievement difference between students coded Hispanic/L
 
 ```{r}
 library(gapr)
-d[1:4, ] |> # data source - just first four rows for first district
+grouped[1:4, ] |> # data source - just first four rows for first district
   estimate_v("white", "hispanic_latino") # columns for reference/focal groups
 ```
 
@@ -130,16 +131,39 @@ Note, on my computer these took about 1 minute per analysis. It will likely take
 
 ```{r}
 # using group_by() |> nest() and map()
+b1_map <- grouped |>
+  group_by(district, academic_year) |>
+  nest() |>
+  mutate(achieve_diff_groupby = map(data, ~estimate_v(.x, "white", "hispanic_latino")))
 ```
 
 ```{r}
 # using nest_by() |> summarize()
+b1_summarize <- grouped |>
+  nest_by(district, academic_year) |>
+  summarize(achieve_diff_nestby = list(estimate_v(data, "white", "hispanic_latino")))
 ```
 
 ### 2. Reproduce the following plot to confirm that the estimates are equivalent across methods.
 
 ```{r}
+# join data
+compare_nested <- left_join(b1_map, b1_summarize, by = c("district", "academic_year"))
 
+# get v from both
+compare <- compare_nested |>
+  mutate(
+    v_group_by = as.numeric(map(achieve_diff_groupby, ~.x[['v']])),
+    v_nest_by = as.numeric(map(achieve_diff_nestby, ~.x[['v']]))
+  )
+
+# reproduce the plot
+
+compare_plot <- compare |>
+  ggplot(aes(v_nest_by, v_group_by)) +
+  geom_point(color = 'grey') +
+  geom_smooth(color = 'skyblue')
+compare_plot
 ```
 
 ### 3. The plot below shows the achievement difference estimates for one school district across years. Produce a similar plot to the below for each of the first 100 school districts. Once you’ve created all the plots, **reproduce them again using an alternative method**. Make sure you don’t miss the caption noting the number of schools in the district.
