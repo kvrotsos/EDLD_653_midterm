@@ -15,6 +15,7 @@ library(rio)
 library(glue)
 library(janitor)
 library(gapr)
+library(fs)
 ```
 
 ## Part A: Data
@@ -102,7 +103,7 @@ print(grouped, n = 10)
 Please install the [`{gapr}`](https://github.com/datalorax/gapr) package using the following code:
 
 ```{r}
-remotes::install_github("datalorax/gapr")
+#remotes::install_github("datalorax/gapr")
 ```
 
 The `{gapr}` package includes a function, `estimate_v()`, which estimates the average difference between two distributions in terms of an effect size when the only data available are counts within bins (for more information, see [Ho & Reardon, 2012](https://journals.sagepub.com/doi/10.3102/1076998611411918)). The nice thing about this approach is that we’re able to obtain the effect size of average differences in achievement between two groups of students as if we had the full, student level data even though we just have counts within bins (performance levels).
@@ -171,10 +172,116 @@ compare_plot
 **Hint**: You need to select unique *districts*. You may want to try something like the following:
 
 ```{r}
-dists <- unique(v$district)[1:100]
+dists <- unique(compare$district)[1:100]
 
-model_list_object |> 
+dists_100 <- compare |> 
   filter(district %in% dists)
+```
+
+```{r}
+# not working as intended
+# get n_schools out of data for ggplot caption - need first value since it's the same across years
+#dists_100_n <- dists_100 |>
+  #group_by(district) |> 
+  #mutate(n_schools_dist = map_dbl(data, ~.x[['n_schools']][1]))
+```
+
+```{r}
+# nest_by() method
+
+#dists_nest <- dists_100_n |>
+    #ungroup() |> 
+    #nest_by(district) |> 
+   # mutate(
+     # plot = list(
+      #  ggplot(data, aes(academic_year, v_group_by)) + 
+       # geom_line(color = 'grey') +
+       # geom_point() +
+        #guides(fill = 'none') +
+       # labs(
+        #  title = glue('Achievement Gap Estimates: {district}'),
+         # subtitle = ,
+         # x = 'School year',
+        #  y = 'Average achievement difference (SD units)',
+         ## caption =
+       # ) +
+        #  theme_minimal()
+  #  )
+ # )
+
+#dists_nest$plot[7]
+```
+
+```{r}
+# got very stuck and tried using Google AI again by plugging in my previous code https://share.google/aimode/QxWKhzsgk97ETZqD6
+## still struggling to get se for the error bars to work without breaking anything - gave up on it after over an hour 
+
+library(stringr)
+
+# Clean the district names first
+compare_cleaned <- compare |>
+  ungroup() |>
+  mutate(district = str_replace(district, "(.*) SD.*", "\\1 School District"))
+
+# 1. Identify the first 100 unique cleaned districts
+dists <- unique(compare_cleaned$district)[1:100]
+
+# 2. Method 1: Using nest_by and rowwise
+plots_nestby <- compare_cleaned |>
+  filter(district %in% dists) |>
+  # Ensure n_schools is attached (using district name or a join)
+  left_join(grouped |> 
+              mutate(district = str_replace(district, "(.*) SD.*", "\\1 School District")) |>
+              select(district, n_schools) |> 
+              distinct(), 
+            by = "district") |>
+  nest_by(district, n_schools) |>
+  mutate(plot = list(
+    ggplot(data, aes(academic_year, v_nest_by, group = 1)) +
+      geom_line(color = "grey") +
+      geom_point() +
+      #geom_errorbar() +
+      geom_hline(yintercept = 0, color = "red") +
+      labs(title = glue::glue("Achievement Gap Estimates: {district}"),
+           subtitle = "Negative values indicate White students have higher average achievement\nPositive values indicate Hispanic/Latino students have higher average achievement",
+           x = "School year",
+           y = "Average achievement difference (SD units)",
+           caption = glue::glue("Note: District includes {n_schools} schools")) +
+      theme_minimal()
+  ))
+
+plots_nestby$plot[[7]]
+```
+
+```{r}
+# rowwise method
+
+plots_rowwise <- compare_cleaned |>
+  filter(district %in% dists) |>
+  left_join(
+    grouped |> 
+      mutate(district = str_replace(district, "SD.*", "School District")) |> 
+      select(district, n_schools) |> 
+      distinct(), 
+    by = "district"
+  ) |>
+  nest(data = -c(district, n_schools)) |> 
+  rowwise(district, n_schools) |> 
+  mutate(plot = list(
+    ggplot(data, aes(academic_year, v_nest_by, group = 1)) +
+      geom_line(color = "grey") +
+      geom_point() +
+      #geom_errorbar() +
+      geom_hline(yintercept = 0, color = "red") +
+      labs(title = glue::glue("Achievement Gap Estimates: {district}"),
+           subtitle = "Negative values indicate White students have higher average achievement\nPositive values indicate Hispanic/Latino students have higher average achievement",
+           x = "School year",
+           y = "Average achievement difference (SD units)",
+           caption = glue::glue("Note: District includes {n_schools} schools")) +
+      theme_minimal()
+  ))
+
+plots_rowwise$plot[[7]]
 ```
 
 ### 4. Save the plots into a “plots” directory. Make sure the file names are meaningful.
@@ -186,7 +293,36 @@ model_list_object |>
 -   When working with the code, limit the number of plots you’re saving to, say, the first five to make sure it works before running it on all plots.
 
 ```{r}
+# make a directory
+dir_create(here("plots", "nest_by"))
 
+# create file paths - separate objects
+files <- str_replace_all(
+  tolower(plots_nestby$district),
+  " ",
+  "-"
+)
+paths <- here("plots", "nest_by", glue("{files}.png"))
+paths
+
+# add paths to data frame
+plots_nestby |> 
+  ungroup() |> 
+  mutate(path = paths) |> 
+  select(plot, path)
+
+# save using rowwise() and summarize()
+plots_nestby |> 
+  ungroup() |> 
+  mutate(path = paths) |> 
+  rowwise() |> 
+  summarize(
+    ggsave(path, plot, 
+      width = 9.5, 
+      height = 6.5,
+      dpi = 500
+    )
+  )
 ```
 
 ## Extra Credit
@@ -194,5 +330,31 @@ model_list_object |>
 #### From question B.3. above, create a third set of plots that puts together each of the pairs of plots from the two methods to confirm that the plots were produced identically by both methods.
 
 ```{r}
+library(patchwork)
+
+# first attempt was far too easy and did not work.......
+#p1 <- plots_rowwise$plot[1:100]
+#p2 <- plots_nestby$plot[1:100]
+#p1 + p2
+
+## need to make sure both data frames are in the same order
+plots_nestby_a <- plots_nestby |>
+  ungroup() |> 
+  arrange(district)
+
+plots_rowwise_b <- plots_rowwise |>
+  ungroup() |> 
+  arrange(district)
+
+## map2 to iterate over both???? - tried using AI and had to keep pushing it to use patchwork and map2 together https://share.google/aimode/D2S7AD5NBBVnJEs0O
+
+compare_methods <- map2(
+  plots_nestby_a$plot, 
+  plots_rowwise_b$plot, 
+  ~ {(.x + ggtitle("Method: nest_by()")) + (.y + ggtitle("Method: rowwise()"))
+    })
+
+view <- wrap_plots(compare_methods[1:3], ncol = 1)
+view
 
 ```
